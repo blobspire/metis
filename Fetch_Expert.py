@@ -24,7 +24,7 @@ Path.home().joinpath(".minari", "datasets").mkdir(parents=True, exist_ok=True)
 
 # Set up Fetch environment
 gym.register_envs(gymnasium_robotics)
-env = DataCollector(gym.make('FetchPickAndPlace-v4', max_episode_steps=500, render_mode="human")) # Uses 'sparse' rewards by default
+env = DataCollector(gym.make('FetchPickAndPlace-v4', max_episode_steps=300, render_mode="human")) # Uses 'sparse' rewards by default
 
 tolerance = 0.01 # Acceptable discrepancy between desired and actual location (to prevent constant motor activations)
 
@@ -41,44 +41,33 @@ for i in tqdm(range(total_episodes)):
 
     # Begin robot action stages 
 
-    # (1) Move arm above block
-    stage_name = "(1) Move arm above block"
-    # size: [0.025 0.025 0.025]
-    # Block is 0.05m x 0.05m x 0.05m
-    ee_pos = obs["observation"][0:3] # [x, y, z]' in global coords
-    block_pos = obs["achieved_goal"]
-    done = False
-    while not done:
-        action = np.array([0.0, 0.0, 0.0, 0.0])
+    # (1) Open gripper
+    stage_name = "(1) Open gripper"
+    action = np.array([0.0, 0.0, 0.0, 1.0])
+    obs, reward, terminated, truncated, info = env.step(a(action))
+    step_count += 1
 
-        # Match x
-        if ee_pos[0] < block_pos[0]: # Could add tolerance here
-            # ee x is left of block x, move right
-            action += np.array([0.05, 0, 0, 0])
-        elif ee_pos[0] > block_pos[0]:
-            # ee x is right of block x, move left
-            action += np.array([-0.05, 0, 0, 0])
-        # Match y
-        if ee_pos[1] < block_pos[1]:
-            # ee y is left of block y, move right
-            action += np.array([0.0, 0.05, 0, 0])
-        elif ee_pos[1] > block_pos[1]:
-            # ee y is right of block y, move left
-            action += np.array([0.0, -0.05, 0, 0])
-
-        obs, reward, terminated, truncated, info = env.step(a(action))
-        step_count += 1
-        # Update positions
+    # (2) Move arm above block
+    if not terminated and not truncated:
+        stage_name = "(2) Move arm above block"
+        # size: [0.025 0.025 0.025]
+        # Block is 0.05m x 0.05m x 0.05m
         ee_pos = obs["observation"][0:3] # [x, y, z]' in global coords
         block_pos = obs["achieved_goal"]
-        done = (abs(ee_pos[0] - block_pos[0]) < tolerance and abs(ee_pos[1] - block_pos[1]) < tolerance) or terminated or truncated
+        done = False
+        while not done:
+            k = 1.5 # Scaling factor
+            dx = block_pos[0] - ee_pos[0]
+            dy = block_pos[1] - ee_pos[1]
+            dz = (block_pos[2] + 0.05) - ee_pos[2]
+            action = np.array([k*dx, k*dy, k*dz, 0.0])
 
-    # (2) Open gripper
-    if not terminated and not truncated:
-        stage_name = "(2) Open gripper"
-        action = np.array([0.0, 0.0, 0.0, 1.0])
-        obs, reward, terminated, truncated, info = env.step(a(action))
-        step_count += 1
+            obs, reward, terminated, truncated, info = env.step(a(action))
+            step_count += 1
+            # Update positions
+            ee_pos = obs["observation"][0:3] # [x, y, z]' in global coords
+            block_pos = obs["achieved_goal"]
+            done = (abs(ee_pos[0] - block_pos[0]) < tolerance and abs(ee_pos[1] - block_pos[1]) < tolerance and abs(ee_pos[2] - (block_pos[2] + 0.05)) < tolerance) or terminated or truncated
 
     # (3) Move ee to block level
     if not terminated and not truncated:
@@ -87,13 +76,15 @@ for i in tqdm(range(total_episodes)):
         block_pos = obs["achieved_goal"]
         done = False
         while not done:
-            action = np.array([0.0, 0.0, -0.05, 0.0])
+            dz = block_pos[2] - ee_pos[2]
+            k = 1.5 # Scaling factor
+            action = np.array([0.0, 0.0, k*dz, 0.0])
             obs, reward, terminated, truncated, info = env.step(a(action))
             step_count += 1
             # Update ee position (and block, though this is redundant in this env)
             ee_pos = obs["observation"][0:3] # [x, y, z]' in global coords
             block_pos = obs["achieved_goal"]
-            done = (abs(ee_pos[2] - block_pos[2]) < 0.01) or terminated or truncated
+            done = (abs(ee_pos[2] - block_pos[2]) < tolerance) or terminated or truncated
 
     # (4) Close gripper to grab block
     if not terminated and not truncated:
@@ -110,29 +101,11 @@ for i in tqdm(range(total_episodes)):
         block_pos = obs["achieved_goal"]
         goal_pos = obs["desired_goal"]
         while not done:
-            action = np.array([0.0, 0.0, 0.0, -0.1])
-
-            # Match x
-            if block_pos[0] < goal_pos[0] - tolerance:
-                # ee x is left of goal x, move right
-                action += np.array([0.05, 0, 0, 0])
-            elif block_pos[0] > goal_pos[0] + tolerance:
-                # ee x is right of goal x, move left
-                action += np.array([-0.05, 0, 0, 0])
-            # Match y
-            if block_pos[1] < goal_pos[1] - tolerance:
-                # ee y is left of goal y, move right
-                action += np.array([0.0, 0.05, 0, 0])
-            elif block_pos[1] > goal_pos[1] + tolerance:
-                # ee y is right of goal y, move left
-                action += np.array([0.0, -0.05, 0, 0])
-            # Move right above goal in z
-            if block_pos[2] < goal_pos[2] - tolerance:
-                # ee z is below goal z, move up
-                action += np.array([0, 0, 0.05, 0])
-            elif block_pos[2] > goal_pos[2] + tolerance:
-                # ee z is above goal z, move down
-                action += np.array([0, 0, -0.05, 0])
+            k = 1.5 # Scaling factor
+            dx = goal_pos[0] - block_pos[0]
+            dy = goal_pos[1] - block_pos[1]
+            dz = goal_pos[2] - block_pos[2]
+            action = np.array([k*dx, k*dy, k*dz, -0.1]) # -0.1 gripper force maintains grip on block
 
             obs, reward, terminated, truncated, info = env.step(a(action))
             # Update positions
