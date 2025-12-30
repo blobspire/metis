@@ -6,36 +6,39 @@ import torch
 
 class TransitionDataset(Dataset):
     """
-    Flattens a Minari dataset of episodes into per-timestep transitions for BC.
-
     Each item is (x_t, a_t) where:
-      x_t = concat(observation_t, desired_goal_t)  -> shape (28,)
-      a_t = action_t                               -> shape (4,)
+      x_t = concat(
+            observation_t (25),
+            goal_delta_t  = desired_goal - achieved_goal (3),
+            obj_delta_t   = achieved_goal - gripper_pos  (3)
+          ) -> shape (31,)
+      a_t = action_t -> shape (4,)
     """
     def __init__(self, minari_dataset):
-        self.X = []
-        self.A = []
+        X_list, A_list = [], []
 
         for ep in minari_dataset:
-            obs = ep.observations     # dict of arrays over time
-            acts = ep.actions         # array over time
+            obs = ep.observations
+            acts = np.asarray(ep.actions)  # (T_act, 4)
 
-            # Pull arrays
-            obs_vec = np.asarray(obs["observation"])     # (T_obs, 25)
-            goal_vec = np.asarray(obs["desired_goal"])   # (T_obs, 3)
-            acts = np.asarray(acts)                      # (T_act, 4)
+            obs_vec = np.asarray(obs["observation"])      # (T_obs, 25)
+            ag = np.asarray(obs["achieved_goal"])         # (T_obs, 3)
+            dg = np.asarray(obs["desired_goal"])          # (T_obs, 3)
 
-            # Align lengths: actions are usually length T, observations sometimes T+1
-            T = min(len(acts), len(obs_vec), len(goal_vec))
+            T = min(len(acts), len(obs_vec), len(ag), len(dg))
 
-            x = np.concatenate([obs_vec[:T], goal_vec[:T]], axis=1)  # (T, 28)
-            a = acts[:T]                                             # (T, 4)
+            grip = obs_vec[:T, 0:3]          # (T, 3)
+            goal_delta = dg[:T] - ag[:T]     # (T, 3)
+            obj_delta  = ag[:T] - grip       # (T, 3)
 
-            self.X.append(torch.as_tensor(x, dtype=torch.float32))
-            self.A.append(torch.as_tensor(a, dtype=torch.float32))
+            x = np.concatenate([obs_vec[:T], goal_delta, obj_delta], axis=1)  # (T, 31)
+            a = acts[:T]                                                      # (T, 4)
 
-        self.X = torch.cat(self.X, dim=0)  # (N, 28)
-        self.A = torch.cat(self.A, dim=0)  # (N, 4)
+            X_list.append(torch.as_tensor(x, dtype=torch.float32))
+            A_list.append(torch.as_tensor(a, dtype=torch.float32))
+
+        self.X = torch.cat(X_list, dim=0)  # (N, 31)
+        self.A = torch.cat(A_list, dim=0)  # (N, 4)
 
     def __len__(self):
         return self.X.shape[0]

@@ -25,7 +25,7 @@ class PolicyNetwork(nn.Module):
     def forward(self, x):
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
-        x = torch.tanh(self.fc3(x)) # Action output is between -1 and 1
+        x = self.fc3(x)
         return x
 
 minari_dataset = minari.load_dataset("pickandplace/expert-v1")
@@ -36,8 +36,8 @@ action_space = env.action_space
 assert isinstance(observation_space, spaces.Dict)
 assert isinstance(action_space, spaces.Box)
 
-# Input will be 25 (observation) + 3 (desired_goal) = 28
-input_dim = observation_space["observation"].shape[0] + observation_space["desired_goal"].shape[0]
+# Input will be 25 (observation) + 3 (goal delta) + 3 (object delta) = 31
+input_dim = 31
 # Output will be 4 (x, y, z, gripper)
 output_dim = action_space.shape[0]
 
@@ -58,7 +58,7 @@ for epoch in range(10):
         x = x.to(device)
         a = a.to(device)
 
-        pred = policy_net(x) # Action output is already between -1 and 1 bc tanh
+        pred = policy_net(x)
         loss = loss_fn(pred, a)
 
         optimizer.zero_grad()
@@ -74,6 +74,20 @@ for epoch in range(10):
 torch.save(policy_net.state_dict(), f"bc_policy_v{VERSION}.pt")
 
 # Test the policy network
+
+# Use goal and object deltas to ease learning
+def make_features(obs):
+    obs_vec = obs["observation"] # (25,)
+    ag = obs["achieved_goal"] # (3,)
+    dg = obs["desired_goal"] # (3,)
+    grip = obs_vec[0:3] # (3,)
+
+    goal_delta = dg - ag # (3,)
+    obj_delta  = ag - grip # (3,)
+
+    x = np.concatenate([obs_vec, goal_delta, obj_delta], axis=0) # (31,)
+    return x
+
 def eval_policy(policy_net, n_episodes=50, render=False):
     print("Begin policy evaluation...")
     gym.register_envs(gymnasium_robotics)
@@ -92,10 +106,12 @@ def eval_policy(policy_net, n_episodes=50, render=False):
             steps = 0
 
             while not done:
-                x = np.concatenate([obs["observation"], obs["desired_goal"]], axis=0) # (28,)
-                x_t = torch.as_tensor(x, dtype=torch.float32, device=device).unsqueeze(0) # (1, 28)
+                x = make_features(obs)
+                x_t = torch.as_tensor(x, dtype=torch.float32, device=device).unsqueeze(0) # (1, 31)
 
                 action = policy_net(x_t).squeeze(0).cpu().numpy().astype(np.float32) # (4,)
+                # Clip action to [-1, 1]
+                action = np.clip(action, -1.0, 1.0)
                 obs, reward, terminated, truncated, info = env.step(action)
 
                 steps += 1
