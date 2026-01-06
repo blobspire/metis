@@ -12,7 +12,7 @@ from Transition_Dataset import TransitionDataset
 
 # Train a policy network from the expert dataset using behavior cloning
 
-# Policy version
+# BC policy version
 VERSION = 2
 
 class PolicyNetwork(nn.Module):
@@ -28,6 +28,7 @@ class PolicyNetwork(nn.Module):
         x = self.fc3(x)
         return x
 
+# Load expert dataset
 minari_dataset = minari.load_dataset("pickandplace/expert-v1")
 
 env = minari_dataset.recover_environment()
@@ -75,7 +76,7 @@ torch.save(policy_net.state_dict(), f"bc_policy_v{VERSION}.pt")
 
 # Test the policy network
 
-# Use goal and object deltas to ease learning
+# Use goal and object delta vectors, rather than pure coordinates, to improve learning
 def make_features(obs):
     obs_vec = obs["observation"] # (25,)
     ag = obs["achieved_goal"] # (3,)
@@ -127,5 +128,5 @@ def eval_policy(policy_net, n_episodes=50, render=False):
     print(f"BC eval: success_rate={success_rate:.3f}, avg_steps={np.mean(lengths):.1f}")
     return success_rate
 
-eval_policy(policy_net, n_episodes=100, render=False)
-eval_policy(policy_net, n_episodes=5, render=True)
+# eval_policy(policy_net, n_episodes=500, render=False)
+# eval_policy(policy_net, n_episodes=5, render=True)
