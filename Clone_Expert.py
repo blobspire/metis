@@ -10,7 +10,6 @@ import minari
 
 from Transition_Dataset import TransitionDataset
 from Policy_Network import PolicyNetwork
-import Eval_Policy as eval
 
 # Train a policy network from the expert dataset using behavior cloning
 
@@ -62,7 +61,3 @@ for epoch in range(10):
 
 # Save the policy network
 torch.save(policy_net.state_dict(), f"bc_policy_v{VERSION}.pt")
-
-# Test the policy network
-eval.eval_policy(policy_net, n_episodes=100, render=False, device=device)
-eval.eval_policy(policy_net, n_episodes=5, render=True, device=device)

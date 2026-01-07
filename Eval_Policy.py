@@ -3,6 +3,8 @@ import torch
 import gymnasium as gym
 import gymnasium_robotics
 
+from Policy_Network import PolicyNetwork
+
 # Use goal and object delta vectors, rather than pure coordinates, to improve learning
 def make_features(obs):
     obs_vec = obs["observation"] # (25,)
@@ -17,14 +19,22 @@ def make_features(obs):
     return x
 
 # Calculate the success rate of the policy
-def eval_policy(policy_net, n_episodes=50, render=False, device="cpu"):
+def eval_policy(policy_path, n_episodes=50, render=False, device="cpu"):
     print("Begin policy evaluation...")
     gym.register_envs(gymnasium_robotics)
 
     env = gym.make("FetchPickAndPlace-v4", max_episode_steps=300,
                    render_mode="human" if render else None)
+    
+    # Input will be 25 (observation) + 3 (goal delta) + 3 (object delta) = 31
+    input_dim = 31
+    # Output will be 4 (x, y, z, gripper)
+    output_dim = env.action_space.shape[0]
 
-    policy_net.eval()
+    policy = PolicyNetwork(input_dim, output_dim).to(device)
+    policy.load_state_dict(torch.load(policy_path, map_location=device))
+    policy.eval()
+
     successes = 0
     lengths = []
 
@@ -38,7 +48,7 @@ def eval_policy(policy_net, n_episodes=50, render=False, device="cpu"):
                 x = make_features(obs)
                 x_t = torch.as_tensor(x, dtype=torch.float32, device=device).unsqueeze(0) # (1, 31)
 
-                action = policy_net(x_t).squeeze(0).cpu().numpy().astype(np.float32) # (4,)
+                action = policy(x_t).squeeze(0).cpu().numpy().astype(np.float32) # (4,)
                 # Clip action to [-1, 1]
                 action = np.clip(action, -1.0, 1.0)
                 obs, reward, terminated, truncated, info = env.step(action)
@@ -50,8 +60,15 @@ def eval_policy(policy_net, n_episodes=50, render=False, device="cpu"):
             lengths.append(steps)
 
     env.close()
-    policy_net.train()
+    policy.train()
 
     success_rate = successes / n_episodes
     print(f"BC eval: success_rate={success_rate:.3f}, avg_steps={np.mean(lengths):.1f}")
     return success_rate
+
+POLICY_PATH = "bc_policy_v2.pt"
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Test the policy network
+eval_policy(policy_path=POLICY_PATH, n_episodes=100, render=False, device=device)
+eval_policy(policy_path=POLICY_PATH, n_episodes=5, render=True, device=device)
