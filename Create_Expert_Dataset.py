@@ -9,7 +9,7 @@ from minari import DataCollector
 from pathlib import Path
 import json
 
-# Create Expert model that will be used to generate expert demonstrations. This will consist of hardcoded conditionals to guide arm movement.
+# Create Expert model and then generate expert demonstrations. This will consist of hardcoded conditionals to guide arm movement.
 
 # User level config
 RUN_VERSION = 1 # Used to create unique dataset and log names
